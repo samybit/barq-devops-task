@@ -53,3 +53,16 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Retest evidence: Ran `docker compose up -d app-01 app-02`. After interval, `docker compose ps` reports both containers as `Up (healthy)`. Ran 30 requests to `/instance` via NGINX, which balanced across `app-01` (17) and `app-02` (13).
 - Related commit: fix(compose): fix app healthcheck route and assign distinct instance id
 - Remaining uncertainty: Need to test database and Redis connectivity on `/ready`, `/records`, and `/counter`.
+
+
+## Entry 4 / 2026-09-13 / 17:42
+- Symptom: `curl -i http://127.0.0.1:8080/ready` returned `HTTP/1.1 503 SERVICE UNAVAILABLE` with `{"dependencies":{"postgres":"unavailable","redis":"unavailable"},"status":"degraded"}`.
+- Hypothesis: Configuration in `config/app.env` contains invalid connection URLs (wrong ports and/or credentials) for PostgreSQL and Redis.
+- Command or test: Inspected `config/app.env` and compared against database credentials in `docker-compose.yml`. Checked `DATABASE_URL` and `REDIS_URL`.
+- Actual output: `DATABASE_URL` specified port 5433 (Postgres listens on 5432) and password ending in `7qN2vK8d` (while Compose sets `7qN2vK8c`). `REDIS_URL` specified port 6380 (while Redis listens on 6379).
+- Failed attempt and what changed your thinking: None; direct cross-reference of `config/app.env` with service configurations in `docker-compose.yml` exposed the typos.
+- Root cause: (1) Typo in database password (`7qN2vK8d` vs `7qN2vK8c`). (2) Postgres port mismatch (`5433` vs standard container port `5432`). (3) Redis port mismatch (`6380` vs standard container port `6379`) in `config/app.env`.
+- Fix: Updated `config/app.env` with `DATABASE_URL=postgresql://barq_app:BarqLabOnly_7qN2vK8c@postgres:5432/barq_tasks` and `REDIS_URL=redis://redis:6379/0`.
+- Retest evidence: Restarted app containers (`docker compose up -d app-01 app-02`). `curl -i http://127.0.0.1:8080/ready` returned `HTTP/1.1 200 OK` with both dependencies reported as `ready`. `curl -s http://127.0.0.1:8080/records` returned seeded records from PostgreSQL. `curl -s http://127.0.0.1:8080/counter` successfully incremented and returned Redis counter values.
+- Related commit: fix(config): correct postgres and redis credentials and port configs
+- Remaining uncertainty: Need to inspect network segregation, exposed host ports on database/redis, persistence configuration (volumes/tmpfs), and container hardening.
