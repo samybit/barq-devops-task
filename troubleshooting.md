@@ -79,3 +79,16 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Retest evidence: Recreated services with `docker compose up -d nginx postgres redis`. Ran `docker compose exec nginx ping -c 1 postgres` and `ping -c 1 redis`—both failed with name resolution errors (`bad address`). Verified `curl http://127.0.0.1:8080/ready` still returns 200 OK.
 - Related commit: fix(network): isolate nginx to frontend network and unpublish database ports
 - Remaining uncertainty: Need to fix persistence traps in Postgres (tmpfs) and Redis (appendonly disabled).
+
+
+## Entry 6 / 2026-09-13 / 18:45
+- Symptom: Database records inserted via `POST /records` disappeared after container recreation (`docker compose up -d --force-recreate postgres`), resetting to only initial seed data.
+- Hypothesis: PostgreSQL data directory `/var/lib/postgresql/data` is mounted in volatile RAM (`tmpfs`), and the persistent named volume `postgres-data` is mapped to an unused path. Redis persistence is also disabled via command flags.
+- Command or test: Inserted record with `curl -X POST http://127.0.0.1:8080/records -H "Content-Type: application/json" -d '{"title": "Test Persistence Record"}'` (assigned id 3). Recreated container with `docker compose up -d --force-recreate postgres` and ran `curl -s http://127.0.0.1:8080/records`.
+- Actual output: Only initial seed records (id 1 and 2) were returned; record 3 was completely wiped. Confirmed `tmpfs: [/var/lib/postgresql/data]` and dummy volume `- postgres-data:/var/lib/postgresql/backup` in `docker-compose.yml`. Confirmed Redis command `--save "" --appendonly no`.
+- Failed attempt and what changed your thinking: None; the data loss was directly reproduced by container recreation, confirming volatile in-memory storage.
+- Root cause: (1) `docker-compose.yml` mounted `/var/lib/postgresql/data` onto `tmpfs` instead of the named volume `postgres-data`. (2) Redis command explicitly disabled snapshots and AOF persistence without volume attachment.
+- Fix: In `docker-compose.yml`, mapped `postgres-data:/var/lib/postgresql/data` and removed the `tmpfs` directive. Updated Redis command to `["redis-server", "--appendonly", "yes"]`, attached named volume `redis-data:/data`, and declared `redis-data` in top-level `volumes`.
+- Retest evidence: Recreated services with `docker compose up -d --force-recreate postgres redis`. Inserted `"title": "Permanent Record"` (id 3). Force-recreated the `postgres` container again. Queried `curl -s http://127.0.0.1:8080/records`; record 3 was successfully preserved.
+- Related commit: fix(compose): fix postgres and redis data persistence volumes
+- Remaining uncertainty: Need to address container security hardening (running as unprivileged user), restart policies, and resource limits.
