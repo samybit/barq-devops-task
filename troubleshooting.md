@@ -40,3 +40,16 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Retest evidence: Reloaded NGINX and restarted app containers. `curl -i http://127.0.0.1:8080/health` now returns `HTTP/1.1 200 OK` with `{"instance_id":"app-01","service":"barq-api","status":"alive","version":"2.0.0"}`.
 - Related commit: fix(routing): correct nginx upstream port and bind flask to 0.0.0.0
 - Remaining uncertainty: Need to verify if `app-02` can also receive traffic, and check database/cache dependencies on `/ready`.
+
+
+## Entry 3 / 2026-09-13 / 17:30
+- Symptom: `app-01` and `app-02` remained stuck in `(unhealthy)` status in `docker compose ps`, and querying `/instance` returned duplicate identity `"instance_id": "app-01"` for both backends.
+- Hypothesis: Container healthcheck is querying an invalid endpoint, and `app-02` environment has a copy-pasted `INSTANCE_ID`.
+- Command or test: Checked container logs (`docker compose logs app-01`), which showed repeated `404 - GET /healthz`. Checked `docker-compose.yml` lines 12 and 59.
+- Actual output: Confirmed healthcheck in `docker-compose.yml` was hitting `/healthz` (which does not exist in Flask API contract), causing `urllib` to fail and mark containers unhealthy. Confirmed `app-02` was configured with `INSTANCE_ID: "app-01"`.
+- Failed attempt and what changed your thinking: None; both flaws were directly visible in container logs and Compose file.
+- Root cause: (1) Healthcheck path mismatch (`/healthz` vs `/health`). (2) Duplicate `INSTANCE_ID: "app-01"` assigned to `app-02` in `docker-compose.yml`.
+- Fix: In `docker-compose.yml`, updated healthcheck URL to `http://127.0.0.1:8080/health`, and changed `app-02` environment to `INSTANCE_ID: "app-02"`.
+- Retest evidence: Ran `docker compose up -d app-01 app-02`. After interval, `docker compose ps` reports both containers as `Up (healthy)`. Ran 30 requests to `/instance` via NGINX, which balanced across `app-01` (17) and `app-02` (13).
+- Related commit: fix(compose): fix app healthcheck route and assign distinct instance id
+- Remaining uncertainty: Need to test database and Redis connectivity on `/ready`, `/records`, and `/counter`.
