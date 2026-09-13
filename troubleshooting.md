@@ -66,3 +66,16 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Retest evidence: Restarted app containers (`docker compose up -d app-01 app-02`). `curl -i http://127.0.0.1:8080/ready` returned `HTTP/1.1 200 OK` with both dependencies reported as `ready`. `curl -s http://127.0.0.1:8080/records` returned seeded records from PostgreSQL. `curl -s http://127.0.0.1:8080/counter` successfully incremented and returned Redis counter values.
 - Related commit: fix(config): correct postgres and redis credentials and port configs
 - Remaining uncertainty: Need to inspect network segregation, exposed host ports on database/redis, persistence configuration (volumes/tmpfs), and container hardening.
+
+
+## Entry 5 / 2026-09-13 / 18:00
+- Symptom: NGINX container had direct network access to internal database/cache containers (`ping postgres` succeeded), and internal ports 15432 and 16379 were bound to host interfaces in `docker-compose.yml`.
+- Hypothesis: NGINX is attached to both `frontend` and `backend` networks, violating tier segregation; Postgres and Redis have unnecessary host port mappings.
+- Command or test: Ran `docker compose exec nginx ping -c 1 postgres` (succeeded with 0% packet loss) and inspected `docker-compose.yml` service port definitions.
+- Actual output: Verified NGINX could directly route packets to Postgres on the internal subnet, bypassing the application layer. Confirmed `ports` directives existed for `postgres` and `redis`.
+- Failed attempt and what changed your thinking: None; architecture specifications in TASK.md and `scripts/video_challenge.py` preflight checks directly flag NGINX backend membership and published database ports as violations.
+- Root cause: `docker-compose.yml` assigned `networks: [frontend, backend]` to `nginx` instead of `[frontend]` only, and published ports `15432:5432` and `16379:6379`.
+- Fix: Removed `backend` from `nginx.networks` in `docker-compose.yml`, keeping only `frontend`. Removed `ports` mappings from both `postgres` and `redis` services.
+- Retest evidence: Recreated services with `docker compose up -d nginx postgres redis`. Ran `docker compose exec nginx ping -c 1 postgres` and `ping -c 1 redis`—both failed with name resolution errors (`bad address`). Verified `curl http://127.0.0.1:8080/ready` still returns 200 OK.
+- Related commit: fix(network): isolate nginx to frontend network and unpublish database ports
+- Remaining uncertainty: Need to fix persistence traps in Postgres (tmpfs) and Redis (appendonly disabled).
