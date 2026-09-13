@@ -92,3 +92,16 @@ Do not fabricate a failed attempt just to fill the template. Record actual attem
 - Retest evidence: Recreated services with `docker compose up -d --force-recreate postgres redis`. Inserted `"title": "Permanent Record"` (id 3). Force-recreated the `postgres` container again. Queried `curl -s http://127.0.0.1:8080/records`; record 3 was successfully preserved.
 - Related commit: fix(compose): fix postgres and redis data persistence volumes
 - Remaining uncertainty: Need to address container security hardening (running as unprivileged user), restart policies, and resource limits.
+
+
+## Entry 7 / 2026-09-13 / 19:10
+- Symptom: Flask app containers ran as privileged `root` user (`whoami` returned `root`), configuration file was baked into the container image, containers lacked restart resilience (`restart: "no"`), and no resource constraints were enforced on services.
+- Hypothesis: `Dockerfile` ended with `USER root` and a redundant `COPY config/app.env`; `docker-compose.yml` had disabled auto-restart policies and omitted `deploy.resources.limits`.
+- Command or test: Checked `docker compose exec app-01 whoami` (output: `root`). Inspected `Dockerfile` lines 8-9 and `docker-compose.yml` service definitions.
+- Actual output: Confirmed app was executing as UID 0 inside the container. Confirmed absence of resource limits and persistence policies in Compose.
+- Failed attempt and what changed your thinking: None; direct static analysis and container process inspection confirmed these security and operational gaps.
+- Root cause: (1) `Dockerfile` switched to `USER root` instead of utilizing the created unprivileged `app` user (UID 10001), and copied `config/app.env` into the build layer. (2) `docker-compose.yml` set `restart: "no"` and lacked CPU/memory resource ceilings.
+- Fix: In `Dockerfile`, removed `COPY config/app.env /srv/app.env` and changed `USER root` to `USER app`. In `docker-compose.yml`, updated all services to `restart: unless-stopped` and added `deploy.resources.limits` (CPU and memory limits) across app, postgres, redis, and nginx.
+- Retest evidence: Rebuilt and restarted containers with `docker compose up --build -d`. Ran `docker compose exec app-01 whoami` which returned `app` (UID 10001). Confirmed all containers returned to healthy state and `curl http://127.0.0.1:8080/ready` returned HTTP 200 OK.
+- Related commit: fix(security): run app as unprivileged user and add compose restart and resource limits
+- Remaining uncertainty: Environment repair phase (Part 2) is now fully complete; ready to proceed to Part 3 (test automation scripts, backup/restore, and CI pipeline).
