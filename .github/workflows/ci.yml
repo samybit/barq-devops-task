@@ -40,7 +40,7 @@ jobs:
           exit-code: "0"
 
       - name: Run environment validation
-        run: python3 validate.py
+        run: python3 validate.py --url http://127.0.0.1:8090
 
       - name: Run failure and recovery test
         run: python3 failure_test.py

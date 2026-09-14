@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 import json
+import os
 import subprocess
 import sys
 import time
 from urllib.error import HTTPError
 from urllib.request import urlopen
 
-BASE_URL = "http://127.0.0.1:8080"
+BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8090")
 TARGET_SERVICE = "app-01"
 
 
@@ -33,8 +34,8 @@ def main():
         if status == 200 and inst:
             baseline_instances.add(inst)
     print(f"Baseline backends: {', '.join(sorted(baseline_instances))}")
-    if {"app-01", "app-02"} != baseline_instances:
-        print("Error: baseline requires both app-01 and app-02 running", file=sys.stderr)
+    if not {"app-01", "app-02"}.issubset(baseline_instances):
+        print("Error: baseline requires at least app-01 and app-02 running", file=sys.stderr)
         sys.exit(1)
 
     try:

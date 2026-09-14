@@ -32,7 +32,7 @@ def wait_for_ready(base_url, timeout=30):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:8080")
+    parser.add_argument("--url", default="http://127.0.0.1:8090")
     args = parser.parse_args()
     base_url = args.url.rstrip("/")
 
